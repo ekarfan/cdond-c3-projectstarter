@@ -4,19 +4,23 @@ orbs:
   slack: circleci/slack@4.3.1
 
 commands:
-  slack-notify:
-    steps:
-      - slack/notify:
-          event: fail
-          template: basic_fail_1
   destroy-environment:
     description: Destroy back-end and front-end cloudformation stacks given a workflow ID.
     steps:
+      - run:
+          name: Install dependencies
+          when: on_fail
+          command: |
+            apk add --no-cache python3 py3-pip
+            pip3 install --upgrade pip
+            pip3 install awscli
+            rm -rf /var/cache/apk/*
       - run:
           name: Destroy environments
           when: on_fail
           command: |
             aws cloudformation delete-stack --stack-name "my-backend-stack-$CIRCLE_WORKFLOW_ID"
+            aws s3 rm --recursive s3://udapeople-$CIRCLE_WORKFLOW_ID
             aws cloudformation delete-stack --stack-name "my-frontend-stack-$CIRCLE_WORKFLOW_ID"
 
   revert-migrations:
@@ -26,14 +30,17 @@ commands:
           name: Revert migrations
           when: on_fail
           command: |
-            # Curl command here to see if there was a successful migration associated with the workflow id, store result in SUCCESS variable
-            SUCCESS = 1
-            if(( $SUCCESS==1 ));
+            if  curl -H "token: 40a82b81-165e-4c01-94b0-df1080ed9140" --request GET https://api.memstash.io/values/migration_${CIRCLE_WORKFLOW_ID} | grep "1"
             then
               cd ~/project/backend
-              npm install
               npm run migrations:revert
+              curl -H "Content-Type: text/plain" -H "token: 40a82b81-165e-4c01-94b0-df1080ed9140" --request PUT --data "0" https://api.memstash.io/values/migration_${CIRCLE_WORKFLOW_ID}
             fi
+  slack-notify:
+    steps:
+      - slack/notify:
+          event: fail
+          template: basic_fail_1
 
 jobs:
   build-frontend:
@@ -199,12 +206,15 @@ jobs:
           keys: [backend-build-$CIRCLE_WORKFLOW_ID]
       - run:
           name: Run migrations
-          command: npm run  migrations > migration_log.log
+          command: |
+            npm run  migrations > migration_log.log
+            cat migration_log.log # TODO Remove while submission
       - run:
           name: Send migration results to memstash
           command: |
             if grep -q "has been executed successfully" "migration_log.log";
             then
+              echo "Setting to memstash"  # TODO Remove while submission
               curl -H "Content-Type: text/plain" -H "token: 40a82b81-165e-4c01-94b0-df1080ed9140" --request PUT --data "1" https://api.memstash.io/values/migration_${CIRCLE_WORKFLOW_ID}
             fi
       - destroy-environment
@@ -243,9 +253,10 @@ jobs:
 
   deploy-backend:
     docker:
-      - image: ansible/ansible
+      - image: circleci/node:13.8.0
     steps:
       - checkout
+      - run: sudo apt install ansible unzip -y
       - add_ssh_keys:
           fingerprints:
             - "66:ff:3b:93:a8:04:05:bc:cd:1d:ba:35:b3:cd:2e:78"
@@ -280,10 +291,15 @@ jobs:
   smoke-test:
     docker:
       - image: alpine:3.13
+    working_directory: ~/project
     steps:
+      - checkout:
+          path: ~/project
+      - restore_cache:
+          keys: [backend-build-$CIRCLE_WORKFLOW_ID]
       - run:
           name: Install dependencies
-          command: apk add --update curl
+          command: apk add --update curl jq
       - attach_workspace:
           at: ~/
       - run:
@@ -293,10 +309,11 @@ jobs:
             export BACKEND_IP=`sed -n 2p .circleci/ansible/inventory.txt`
             export API_URL="http://${BACKEND_IP}:3030/api/status"
             echo "${API_URL}"
-            echo "export API_URL=${API_URL}" >> $BASH_ENV
-      - run:
-          name: Backend smoke test.
-          command: curl $API_URL
+            # echo "export API_URL=${API_URL}" >> $BASH_ENV
+            curl $API_URL
+      # - run:
+      #     name: Backend smoke test.
+      #     command: 
 
       - run:
           name: Frontend smoke test.
@@ -316,12 +333,10 @@ jobs:
   cloudfront-update:
     docker:
       - image: amazon/aws-cli
+    working_directory: ~/project
     steps:
-      # Checkout code from git
-      # - run:
-      #     name: Install dependencies
-      #     command: |
-      #       # your code here
+      - checkout:
+          path: ~/project
       - run:
           name: Update cloudfront distribution
           command: |
@@ -335,8 +350,10 @@ jobs:
   cleanup:
       docker:
         - image: amazon/aws-cli
+      working_directory: ~/project
       steps:
-        # Checkout code from git
+        - checkout:
+          path: ~/project
         - run:
             name: Get old stack workflow id
             command: |
@@ -349,6 +366,10 @@ jobs:
               if [[ "${STACKS[@]}" =~ "${OldWorkflowID}" ]]
               then
                 # your code here
+                echo "Deleting"
+                aws cloudformation delete-stack --stack-name "my-backend-stack-$CIRCLE_WORKFLOW_ID"
+                aws s3 rm --recursive s3://udapeople-$CIRCLE_WORKFLOW_ID
+                aws cloudformation delete-stack --stack-name "my-frontend-stack-$CIRCLE_WORKFLOW_ID"
               fi
         - slack-notify
 
@@ -382,7 +403,7 @@ workflows:
           requires: [run-migrations]
       - smoke-test:
           requires: [deploy-backend, deploy-frontend]
-      - cloudfront-update:
-          requires: [smoke-test]
-      - cleanup:
-          requires: [cloudfront-update]
+      # - cloudfront-update:
+      #     requires: [smoke-test]
+      # - cleanup:
+      #     requires: [cloudfront-update]

@@ -1,0 +1,21 @@
+- name: Extract backend
+  unarchive:
+    src: backend.zip
+    dest: /home/ubuntu/
+    remote_src:  no
+
+- name: Copy .env
+  copy:
+    src: .env
+    dest: /home/ubuntu/
+
+- name: Copy package
+  copy:
+    src: package.json
+    dest: /home/ubuntu/
+
+- name: Install libraries
+  shell: npm install
+
+- name: Start webserver
+  shell: . /home/ubuntu/.env && pm2 start dist/main.js
