@@ -345,6 +345,8 @@ jobs:
               --tags project=my_tag \
               --stack-name "my-udapeople-cloud-front" \
               --parameter-overrides WorkflowID="udapeople-${CIRCLE_WORKFLOW_ID}"
+      - destroy-environment
+      - revert-migrations
       - slack-notify
 
   cleanup:
@@ -353,7 +355,7 @@ jobs:
       working_directory: ~/project
       steps:
         - checkout:
-          path: ~/project
+            path: ~/project
         - run:
             name: Get old stack workflow id anmd 
             command: |
