@@ -8,6 +8,12 @@
   apt:
     upgrade: yes
 
+- name: Install unzip
+  become: yes
+  apt:
+    name: unzip
+    state: latest
+
 - name: Install node
   become: yes
   apt:
