@@ -355,22 +355,26 @@ jobs:
         - checkout:
           path: ~/project
         - run:
-            name: Get old stack workflow id
+            name: Get old stack workflow id anmd 
             command: |
-              # your code here
-              export OldWorkflowID=$(aws cloudformation list-exports --query "Exports[?Name==\`WorkflowID\`].Value" --no-paginate --output text)
+              # export OldWorkflowID=$(aws cloudformation list-exports --query "Exports[?Name==\`WorkflowID\`].Value" --no-paginate --output text)
               export STACKS=[] #put the list of stacks here
-        - run:
-            name: Remove old stacks and files
-            command: |
-              if [[ "${STACKS[@]}" =~ "${OldWorkflowID}" ]]
-              then
-                # your code here
-                echo "Deleting"
-                aws cloudformation delete-stack --stack-name "my-backend-stack-$CIRCLE_WORKFLOW_ID"
-                aws s3 rm --recursive s3://udapeople-$CIRCLE_WORKFLOW_ID
-                aws cloudformation delete-stack --stack-name "my-frontend-stack-$CIRCLE_WORKFLOW_ID"
-              fi
+              for id in $STACKS
+              do
+                  if [[ $id != *$CIRCLE_WORKFLOW_ID ]]  # If cloudfront stack is not current deployment
+                  then
+                      if [[ $id == "my-frontend-stack-"* ]]  # If stack is FE then empty the bucket first
+                      then
+                          echo "Deleting s3 bucket content for $id"
+                          export workflowidID=${id#"my-frontend-stack-"}
+                          aws s3 rm --recursive s3://udapeople-$workflowidID
+                      fi
+                      echo "Deleting $id"
+                      aws cloudformation delete-stack --stack-name $id
+                  else
+                      echo "Skipping $id"
+                  fi
+              done
         - slack-notify
 
 
@@ -403,7 +407,7 @@ workflows:
           requires: [run-migrations]
       - smoke-test:
           requires: [deploy-backend, deploy-frontend]
-      # - cloudfront-update:
-      #     requires: [smoke-test]
-      # - cleanup:
-      #     requires: [cloudfront-update]
+      - cloudfront-update:
+          requires: [smoke-test]
+      - cleanup:
+          requires: [cloudfront-update]
